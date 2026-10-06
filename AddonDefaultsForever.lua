@@ -1,5 +1,13 @@
 local addonName, ns = ...
 
+-- Toggle debug messages when a default is applied.
+local DEBUG = false
+
+local function DebugPrint(fmt, ...)
+    if not DEBUG then return end
+    print(string.format("|cff00ff00%s|r: %s", addonName, string.format(fmt, ...)))
+end
+
 -- Per-addon config:
 --  addon    : exact addon folder name (case-insensitive)
 --  db       : global saved variable name
@@ -78,8 +86,15 @@ local function ApplySavedVariables(config)
 
     local force = config.mode == "force"
     for key, value in pairs(config.defaults) do
-        if force or target[key] == nil then
+        local shouldSet = force or target[key] == nil
+        if shouldSet then
             target[key] = value
+            DebugPrint("Set %s%s.%s = %s (mode: %s)",
+                config.db,
+                config.path and ("." .. config.path) or "",
+                key,
+                tostring(value),
+                config.mode)
         end
     end
     return true
@@ -108,6 +123,8 @@ frame:SetScript("OnEvent", function(self, event, loadedAddon)
     local configs = pending[loadedAddon:lower()]
     if not configs then return end
 
+    DebugPrint("ADDON_LOADED: %s", loadedAddon)
+
     for _, config in ipairs(configs) do
         Apply(config)
         if config.poll then
@@ -122,6 +139,7 @@ for _, config in ipairs(ns.config) do
     QueueForAddon(config.addon, config, pending)
 
     if IsAddOnLoadedCompat(config.addon) then
+        DebugPrint("Already loaded at startup: %s", config.addon)
         Apply(config)
 
         if config.poll then
