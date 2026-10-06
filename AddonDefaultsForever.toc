@@ -1,0 +1,7 @@
+## Interface: 16001
+## Title: Addon Defaults Forever
+## Notes: Applies custom defaults to other addons' saved variables, with optional polling.
+## Version: 1.1.0
+
+AddonDefaultsForever.lua
+

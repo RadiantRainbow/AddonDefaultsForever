@@ -1,0 +1,143 @@
+local addonName, ns = ...
+
+-- Per-addon config:
+--  addon    : exact addon folder name (case-insensitive)
+--  db       : global saved variable name
+--  path     : optional dot-separated sub-path inside the DB (e.g. "profile")
+--             defaults to the DB root
+--  defaults : key/value pairs to apply
+--  mode     : "default" = only if key is nil
+--             "force"   = overwrite existing value
+--  poll     : if true, re-apply every 5 seconds while addon is loaded
+ns.config = {
+    {
+        addon = "Buffet",
+        db = "BuffetDB",
+        defaults = {
+            hearthstone = false,
+        },
+        mode = "force",
+        poll = false,
+    },
+    {
+        addon = "RXPGuides",
+        db = "RXPSettings",
+        path = "profile",
+        defaults = {
+            enableLevelUpAnnounceSolo = false,
+            enableLevelUpAnnounceGroup = false,
+            enableLevelUpAnnounceGuild = false,
+            enableCompleteStepAnnouncements = false,
+            enableCollectStepAnnouncements = false,
+            enableFlyStepAnnouncements = false,
+            alwaysSendBranded = false,
+            checkVersions = false,
+            shareQuests = false,
+            shareActiveSteps = false,
+        },
+        mode = "force",
+        poll = true,
+    },
+}
+
+local pending = {}
+local polling = {}
+
+local function IsAddOnLoadedCompat(name)
+    if C_AddOns and C_AddOns.IsAddOnLoaded then
+        return C_AddOns.IsAddOnLoaded(name)
+    end
+    return IsAddOnLoaded(name)
+end
+
+local function ResolvePath(root, path)
+    if not path or path == "" then
+        return root
+    end
+
+    local current = root
+    for segment in path:gmatch("[^%.]+") do
+        if type(current) ~= "table" then
+            return nil
+        end
+        current = current[segment]
+    end
+    return current
+end
+
+local function ApplySavedVariables(config)
+    local db = _G[config.db]
+    if type(db) ~= "table" then
+        return false
+    end
+
+    local target = ResolvePath(db, config.path)
+    if type(target) ~= "table" then
+        return false
+    end
+
+    local force = config.mode == "force"
+    for key, value in pairs(config.defaults) do
+        if force or target[key] == nil then
+            target[key] = value
+        end
+    end
+    return true
+end
+
+local function Apply(config)
+    if config.apply then
+        return config.apply(config)
+    elseif config.db and config.defaults then
+        return ApplySavedVariables(config)
+    end
+    return false
+end
+
+local function QueueForAddon(addonName, config, targetTable)
+    local key = addonName:lower()
+    targetTable[key] = targetTable[key] or {}
+    table.insert(targetTable[key], config)
+end
+
+local frame = CreateFrame("Frame")
+frame:RegisterEvent("ADDON_LOADED")
+frame:SetScript("OnEvent", function(self, event, loadedAddon)
+    if event ~= "ADDON_LOADED" then return end
+
+    local configs = pending[loadedAddon:lower()]
+    if not configs then return end
+
+    for _, config in ipairs(configs) do
+        Apply(config)
+        if config.poll then
+            QueueForAddon(config.addon, config, polling)
+        end
+    end
+
+    pending[loadedAddon:lower()] = nil
+end)
+
+for _, config in ipairs(ns.config) do
+    QueueForAddon(config.addon, config, pending)
+
+    if IsAddOnLoadedCompat(config.addon) then
+        Apply(config)
+
+        if config.poll then
+            QueueForAddon(config.addon, config, polling)
+        end
+    end
+end
+
+pending[addonName:lower()] = nil
+
+C_Timer.NewTicker(5, function()
+    for addon, configs in pairs(polling) do
+        if IsAddOnLoadedCompat(addon) then
+            for _, config in ipairs(configs) do
+                Apply(config)
+            end
+        end
+    end
+end)
