@@ -1,7 +1,7 @@
 local addonName, ns = ...
 
 -- Toggle debug chat messages.
-local DEBUG = true
+local DEBUG = false
 
 local function DebugPrint(fmt, ...)
     if not DEBUG then return end
