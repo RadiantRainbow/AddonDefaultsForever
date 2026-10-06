@@ -15,5 +15,5 @@ Each entry supports:
 
 ## Addons
 
-- Buffet: disable hearthstone default
-- RXP: silence ads
+- Buffet: disable hearthstone default.
+- RXP: silence ads.
