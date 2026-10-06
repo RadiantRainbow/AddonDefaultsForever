@@ -1,7 +1,7 @@
 local addonName, ns = ...
 
--- Toggle debug messages when a default is applied.
-local DEBUG = false
+-- Toggle debug chat messages.
+local DEBUG = true
 
 local function DebugPrint(fmt, ...)
     if not DEBUG then return end
@@ -11,8 +11,10 @@ end
 -- Per-addon config:
 --  addon    : exact addon folder name (case-insensitive)
 --  db       : global saved variable name
---  path     : optional dot-separated sub-path inside the DB (e.g. "profile")
---             defaults to the DB root
+--  path     : optional sub-path inside the DB
+--             - omit or ""       : apply to the root table
+--             - "profiles"       : apply to every profile in an AceDB saved variable
+--             - "profile" etc.   : apply to a direct sub-key
 --  defaults : key/value pairs to apply
 --  mode     : "default" = only if key is nil
 --             "force"   = overwrite existing value
@@ -30,7 +32,7 @@ ns.config = {
     {
         addon = "RXPGuides",
         db = "RXPSettings",
-        path = "profile",
+        path = "profiles",
         defaults = {
             enableLevelUpAnnounceSolo = false,
             enableLevelUpAnnounceGroup = false,
@@ -73,30 +75,59 @@ local function ResolvePath(root, path)
     return current
 end
 
+local function GatherTargets(db, path)
+    local targets = {}
+
+    if path == "profiles" then
+        if type(db.profiles) == "table" then
+            for name, profile in pairs(db.profiles) do
+                if type(profile) == "table" then
+                    table.insert(targets, profile)
+                end
+            end
+        end
+    else
+        local target = ResolvePath(db, path)
+        if type(target) == "table" then
+            table.insert(targets, target)
+        end
+    end
+
+    return targets
+end
+
 local function ApplySavedVariables(config)
     local db = _G[config.db]
     if type(db) ~= "table" then
+        DebugPrint("DB not ready: %s", config.db)
         return false
     end
 
-    local target = ResolvePath(db, config.path)
-    if type(target) ~= "table" then
+    local targets = GatherTargets(db, config.path)
+    if #targets == 0 then
+        DebugPrint("No targets found: %s%s", config.db,
+            config.path and ("." .. config.path) or "")
         return false
     end
 
     local force = config.mode == "force"
-    for key, value in pairs(config.defaults) do
-        local shouldSet = force or target[key] == nil
-        if shouldSet then
-            target[key] = value
-            DebugPrint("Set %s%s.%s = %s (mode: %s)",
-                config.db,
-                config.path and ("." .. config.path) or "",
-                key,
-                tostring(value),
-                config.mode)
+    local pathLabel = config.path or "<root>"
+
+    for _, target in ipairs(targets) do
+        for key, value in pairs(config.defaults) do
+            local shouldSet = force or target[key] == nil
+            if shouldSet then
+                target[key] = value
+                DebugPrint("Set %s.%s.%s = %s (mode: %s)",
+                    config.db,
+                    pathLabel,
+                    key,
+                    tostring(value),
+                    config.mode)
+            end
         end
     end
+
     return true
 end
 
@@ -117,22 +148,38 @@ end
 
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
+frame:RegisterEvent("PLAYER_LOGIN")
+
 frame:SetScript("OnEvent", function(self, event, loadedAddon)
-    if event ~= "ADDON_LOADED" then return end
+    if event == "ADDON_LOADED" then
+        local configs = pending[loadedAddon:lower()]
+        if not configs then return end
 
-    local configs = pending[loadedAddon:lower()]
-    if not configs then return end
+        DebugPrint("ADDON_LOADED: %s", loadedAddon)
 
-    DebugPrint("ADDON_LOADED: %s", loadedAddon)
+        for _, config in ipairs(configs) do
+            Apply(config)
+            if config.poll then
+                QueueForAddon(config.addon, config, polling)
+            end
+        end
 
-    for _, config in ipairs(configs) do
-        Apply(config)
-        if config.poll then
-            QueueForAddon(config.addon, config, polling)
+        pending[loadedAddon:lower()] = nil
+    elseif event == "PLAYER_LOGIN" then
+        DebugPrint("PLAYER_LOGIN")
+
+        for addon, configs in pairs(pending) do
+            if IsAddOnLoadedCompat(addon) then
+                for _, config in ipairs(configs) do
+                    Apply(config)
+                    if config.poll then
+                        QueueForAddon(config.addon, config, polling)
+                    end
+                end
+                pending[addon] = nil
+            end
         end
     end
-
-    pending[loadedAddon:lower()] = nil
 end)
 
 for _, config in ipairs(ns.config) do
@@ -141,7 +188,6 @@ for _, config in ipairs(ns.config) do
     if IsAddOnLoadedCompat(config.addon) then
         DebugPrint("Already loaded at startup: %s", config.addon)
         Apply(config)
-
         if config.poll then
             QueueForAddon(config.addon, config, polling)
         end
